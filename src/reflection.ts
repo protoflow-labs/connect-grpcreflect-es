@@ -1,14 +1,9 @@
-import { ConnectRouter } from "@bufbuild/connect";
+import { Code, ConnectRouter } from "@bufbuild/connect";
 import { ServerReflection } from "../gen/reflection_connect";
-import { ErrorResponse, FileDescriptorResponse, ServerReflectionRequest, ServerReflectionResponse } from "../gen/reflection_pb";
-import { DescEnum, DescExtension, DescMessage, DescService, DescriptorSet, FileDescriptorProto, FileDescriptorSet, createDescriptorSet, createRegistry } from "@bufbuild/protobuf";
+import { ErrorResponse, FileDescriptorResponse, ListServiceResponse, ServerReflectionRequest, ServerReflectionResponse, ServiceResponse } from "../gen/reflection_pb";
+import { DescEnum, DescExtension, DescFile, DescMessage, DescService, DescriptorSet, FileDescriptorProto, FileDescriptorSet, createDescriptorSet, createRegistry } from "@bufbuild/protobuf";
 
-const NOT_FOUND_CODE = 5;
-
-export const withReflection = (router: ConnectRouter, fileDescriptorData: FileDescriptorProto[] | FileDescriptorSet | Uint8Array) => {
-	// TODO - Can we derive the fileDescriptorData from the compiled type definitions? (probably not)
-	// const services = router.handlers.map(h => h.service);
-	// const registry = createRegistry(...services);
+export const withReflection = (fileDescriptorData: FileDescriptorProto[] | FileDescriptorSet | Uint8Array, router: ConnectRouter) => {
 	const ds = createDescriptorSet(fileDescriptorData);
 
 	router.service(ServerReflection, {
@@ -33,10 +28,34 @@ const reflectionHandler = (ds: DescriptorSet) => async function*(reqs: AsyncIter
 		});
 
 		switch(req.messageRequest.case) {
-			case 'fileContainingSymbol': {
-				response.messageResponse = findDescriptorByName(ds, req.messageRequest.value);
+			case 'fileByFilename': {
+				response.messageResponse = findFileByFilename(ds, req.messageRequest.value);
         break;
 			}
+
+      case 'fileContainingSymbol': {
+				response.messageResponse = findFileContainingSymbol(ds, req.messageRequest.value);
+        break;
+			}
+
+      case 'listServices': {
+				response.messageResponse = listServices(ds)
+        break;
+			}
+
+      case 'allExtensionNumbersOfType': {
+				response.messageResponse = errorResponse('Not currently implemented', Code.Unimplemented)
+        break;
+			}
+
+      case 'fileContainingExtension': {
+				response.messageResponse = errorResponse('Not currently implemented', Code.Unimplemented)
+        break;
+			}
+
+      default: {
+        response.messageResponse = notFoundErrorResponse(req.messageRequest.value || '');
+      }
 		}
 		yield response;
 	}
@@ -47,13 +66,39 @@ type ErrorCase = {
   case: "errorResponse";
 }
 
-type FileContainingSymbolResponse = {
+type FileDescriptorCase = {
   value: FileDescriptorResponse;
   case: "fileDescriptorResponse";
-} | ErrorCase
+}
+
+type ListServiceResponseCase = {
+  value: ListServiceResponse;
+  case: "listServicesResponse";
+}
+
+const listServices = (ds: DescriptorSet): ListServiceResponseCase => {
+  return {
+    case: 'listServicesResponse',
+    value: new ListServiceResponse({
+      service: [...ds.services.keys()].map(serviceName => new ServiceResponse({
+        name: serviceName
+      }))
+    }),
+  }
+}
+
+const findFileByFilename = (ds: DescriptorSet, filename: string): FileDescriptorCase | ErrorCase => {
+  const sanitizedFilename = filename.replace(/\.proto$/, '');
+  const file = ds.files.find(f => f.name === sanitizedFilename)
+  if (file) {
+    return fileDescriptorResponse(file);
+  }
+
+  return notFoundErrorResponse(filename);
+}
 
 // Rough port of https://github.com/protocolbuffers/protobuf-go/blob/808c66411fe76c839a68168654228446fbdc1ecf/reflect/protoregistry/registry.go#L222
-const findDescriptorByName = (ds: DescriptorSet, name: string): FileContainingSymbolResponse => {
+const findFileContainingSymbol = (ds: DescriptorSet, name: string): FileDescriptorCase | ErrorCase => {
   let prefix = name;
   let suffix = '';
 
@@ -62,29 +107,22 @@ const findDescriptorByName = (ds: DescriptorSet, name: string): FileContainingSy
     if (lookup) {
       const { type, descriptor } = lookup;
       if (descriptor.typeName === name) {
-        return {
-          case: 'fileDescriptorResponse',
-          value: new FileDescriptorResponse({
-            fileDescriptorProto: [descriptor.file.proto.toBinary()],
-          })
-        };
+        return fileDescriptorResponse(descriptor.file);
       }
 
       switch (type) {
         case 'message': {
-          // Handle potential sub message match
+          const response = findDescriptorInMessage(ds, descriptor, suffix);
+          if (response) {
+            return response;
+          }
           break;
         }
 
         case 'service': {
           const method = descriptor.methods.find(m => m.name === suffix)
           if (method) {
-            return {
-              case: 'fileDescriptorResponse',
-              value: new FileDescriptorResponse({
-                fileDescriptorProto: [method.parent.file.proto.toBinary()],
-              })
-            };
+            return fileDescriptorResponse(method.parent.file)
           }
         }
       }
@@ -96,7 +134,54 @@ const findDescriptorByName = (ds: DescriptorSet, name: string): FileContainingSy
     prefix = parts.join('.')
   }
 
-  return notFoundError(name)
+  return notFoundErrorResponse(name)
+}
+
+// This recursive function has not really been tested at all, what's the worst that can happen?
+const findDescriptorInMessage = (ds: DescriptorSet, message: DescMessage, suffix: string): FileDescriptorCase | undefined => {
+  const parts = suffix.split('.');
+  const name = parts.pop();
+  suffix = parts.join('.');
+
+  if (suffix === '') {
+    const enumDesc = message.nestedEnums.find(nested => nested.name === name);
+    if (enumDesc) {
+      return fileDescriptorResponse(enumDesc.file);
+    }
+
+    for (const nestedEnum of message.nestedEnums) {
+      const value = nestedEnum.values.find(value => value.name === name);
+      if (value) {
+        return fileDescriptorResponse(value.parent.file)
+      }
+    }
+
+    const extension = message.nestedExtensions.find(nested => nested.name === name);
+    if (extension) {
+      return fileDescriptorResponse(extension.file);
+    }
+
+    const field = message.fields.find(nested => nested.name === name);
+    if (field) {
+      return fileDescriptorResponse(field.parent.file);
+    }
+
+    const oneof = message.oneofs.find(nested => nested.name === name);
+    if (oneof) {
+      return fileDescriptorResponse(oneof.parent.file);
+    }
+  }
+
+  const nestedMessage = message.nestedMessages.find(nested => nested.name === name);
+  if (nestedMessage) {
+    if (suffix === '') {
+      return fileDescriptorResponse(message.file);
+    }
+
+    return findDescriptorInMessage(ds, message, suffix);
+  }
+
+  return undefined;
 }
 
 type DescriptorLookup = {
@@ -147,10 +232,19 @@ const lookupDescriptor = (ds: DescriptorSet, name: string): DescriptorLookup => 
   }
 };
 
-const notFoundError = (name: string): ErrorCase => ({
+const fileDescriptorResponse = (file: DescFile): FileDescriptorCase => ({
+    case: 'fileDescriptorResponse',
+    value: new FileDescriptorResponse({
+      fileDescriptorProto: [file.proto.toBinary()],
+    })
+  })
+
+const errorResponse = (errorMessage: string, errorCode: number): ErrorCase => ({
   case: 'errorResponse',
   value: new ErrorResponse({
-    errorMessage: `Could not find: ${name}`,
-    errorCode: NOT_FOUND_CODE
+    errorMessage,
+    errorCode,
   }),
-});
+})
+
+const notFoundErrorResponse = (name: string) => errorResponse(`Could not find: ${name}`, Code.NotFound);

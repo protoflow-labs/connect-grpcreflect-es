@@ -7,6 +7,6 @@
     "strict": true,
 		"sourceMap": true
   },
-  "include": ["src"],
+  "include": ["src", "example"],
   "exclude": ["node_modules", "**/__tests__/*"]
 }
