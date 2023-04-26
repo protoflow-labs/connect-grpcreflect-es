@@ -3,6 +3,9 @@ import { ServerReflection } from "../gen/reflection_connect";
 import { ErrorResponse, FileDescriptorResponse, ListServiceResponse, ServerReflectionRequest, ServerReflectionResponse, ServiceResponse } from "../gen/reflection_pb";
 import { DescEnum, DescExtension, DescFile, DescMessage, DescService, DescriptorSet, FileDescriptorProto, FileDescriptorSet, createDescriptorSet, createRegistry } from "@bufbuild/protobuf";
 
+/**
+ * Given a FileDescriptor for your protos, generates new routes to offer reflection.
+*/
 export const withReflection = (fileDescriptorData: FileDescriptorProto[] | FileDescriptorSet | Uint8Array, router: ConnectRouter) => {
 	const ds = createDescriptorSet(fileDescriptorData);
 
@@ -20,6 +23,9 @@ export const withReflection = (fileDescriptorData: FileDescriptorProto[] | FileD
 	});
 };
 
+/**
+ * Handles incoming reflection requests, inspecting their type and resolving accordingly
+ */
 const reflectionHandler = (ds: DescriptorSet) => async function*(reqs: AsyncIterable<ServerReflectionRequest>) {
 	for await (const req of reqs) {
 		const response = new ServerReflectionResponse({
