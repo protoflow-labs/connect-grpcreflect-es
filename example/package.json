@@ -14,7 +14,7 @@
     "typescript": "^5.0.4"
   },
   "scripts": {
-    "generate": "npx buf generate proto && npx buf build -o proto/image.bin --as-file-descriptor-set",
+    "generate": "npx buf generate proto && cd ./proto npx buf build -o image.bin --as-file-descriptor-set",
     "start": "ts-node server.ts"
   }
 }
