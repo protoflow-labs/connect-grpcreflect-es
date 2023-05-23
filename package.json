@@ -1,5 +1,5 @@
 {
-  "name": "grpc-node-reflection",
+  "name": "connect-grpcreflect-es",
   "version": "1.0.0",
   "main": "dist/reflection.js",
   "types": "dist/reflection.d.ts",

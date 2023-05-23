@@ -4,7 +4,7 @@
   "license": "MIT",
   "dependencies": {
     "@bufbuild/connect-node": "^0.8.6",
-    "grpc-node-reflection": "file:../"
+    "connect-grpcreflect-es": "file:../"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.15.0-1",

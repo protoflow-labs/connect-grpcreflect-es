@@ -1,6 +1,6 @@
 import * as http2 from "http2";
 import { connectNodeAdapter } from "@bufbuild/connect-node";
-import { withReflection } from "grpc-node-reflection";
+import { withReflection } from "connect-grpcreflect-es";
 import { readFileSync } from "fs";
 import { ElizaService } from "./gen/eliza_connect";
 import { ConnectRouter } from "@bufbuild/connect";
