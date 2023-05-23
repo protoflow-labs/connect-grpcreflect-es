@@ -21,9 +21,12 @@ var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _ar
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.withReflection = void 0;
 const connect_1 = require("@bufbuild/connect");
-const reflection_connect_1 = require("../gen/reflection_connect");
-const reflection_pb_1 = require("../gen/reflection_pb");
 const protobuf_1 = require("@bufbuild/protobuf");
+const reflection_connect_1 = require("./gen/reflection_connect");
+const reflection_pb_1 = require("./gen/reflection_pb");
+/**
+ * Given a FileDescriptor for your protos, generates new routes to offer reflection.
+ */
 const withReflection = (fileDescriptorData, router) => {
     const ds = (0, protobuf_1.createDescriptorSet)(fileDescriptorData);
     router.service(reflection_connect_1.ServerReflection, {
@@ -31,11 +34,14 @@ const withReflection = (fileDescriptorData, router) => {
     });
     // Some tools haven't been updated to use the v1 release of server reflection so we need
     // to support alpha as well (luckily the schemas are the same)
-    router.service(Object.assign(Object.assign({}, reflection_connect_1.ServerReflection), { typeName: "grpc.reflection.v1alpha.ServerReflection" }), {
+    router.service(Object.assign(Object.assign({}, reflection_connect_1.ServerReflection), { typeName: 'grpc.reflection.v1alpha.ServerReflection' }), {
         serverReflectionInfo: reflectionHandler(ds),
     });
 };
 exports.withReflection = withReflection;
+/**
+ * Handles incoming reflection requests, inspecting their type and resolving accordingly
+ */
 const reflectionHandler = (ds) => function (reqs) {
     return __asyncGenerator(this, arguments, function* () {
         var _a, e_1, _b, _c;
@@ -47,7 +53,7 @@ const reflectionHandler = (ds) => function (reqs) {
                     const req = _c;
                     const response = new reflection_pb_1.ServerReflectionResponse({
                         validHost: req.host,
-                        originalRequest: req
+                        originalRequest: req,
                     });
                     switch (req.messageRequest.case) {
                         case 'fileByFilename': {
@@ -95,8 +101,8 @@ const listServices = (ds) => {
         case: 'listServicesResponse',
         value: new reflection_pb_1.ListServiceResponse({
             service: [...ds.services.keys()].map(serviceName => new reflection_pb_1.ServiceResponse({
-                name: serviceName
-            }))
+                name: serviceName,
+            })),
         }),
     };
 };
@@ -121,7 +127,10 @@ const findFileContainingSymbol = (ds, name) => {
             }
             switch (type) {
                 case 'message': {
-                    // Handle potential sub message match
+                    const response = findDescriptorInMessage(ds, descriptor, suffix);
+                    if (response) {
+                        return response;
+                    }
                     break;
                 }
                 case 'service': {
@@ -134,10 +143,48 @@ const findFileContainingSymbol = (ds, name) => {
         }
         const parts = prefix.split('.');
         const trailing = parts.pop() || '';
-        suffix = suffix ? (suffix + '.' + trailing) : trailing;
+        suffix = suffix ? suffix + '.' + trailing : trailing;
         prefix = parts.join('.');
     }
     return notFoundErrorResponse(name);
+};
+// This recursive function has not really been tested at all, what's the worst that can happen?
+const findDescriptorInMessage = (ds, message, suffix) => {
+    const parts = suffix.split('.');
+    const name = parts.pop();
+    suffix = parts.join('.');
+    if (suffix === '') {
+        const enumDesc = message.nestedEnums.find(nested => nested.name === name);
+        if (enumDesc) {
+            return fileDescriptorResponse(enumDesc.file);
+        }
+        for (const nestedEnum of message.nestedEnums) {
+            const value = nestedEnum.values.find(value => value.name === name);
+            if (value) {
+                return fileDescriptorResponse(value.parent.file);
+            }
+        }
+        const extension = message.nestedExtensions.find(nested => nested.name === name);
+        if (extension) {
+            return fileDescriptorResponse(extension.file);
+        }
+        const field = message.fields.find(nested => nested.name === name);
+        if (field) {
+            return fileDescriptorResponse(field.parent.file);
+        }
+        const oneof = message.oneofs.find(nested => nested.name === name);
+        if (oneof) {
+            return fileDescriptorResponse(oneof.parent.file);
+        }
+    }
+    const nestedMessage = message.nestedMessages.find(nested => nested.name === name);
+    if (nestedMessage) {
+        if (suffix === '') {
+            return fileDescriptorResponse(message.file);
+        }
+        return findDescriptorInMessage(ds, message, suffix);
+    }
+    return undefined;
 };
 const lookupDescriptor = (ds, name) => {
     const service = ds.services.get(name);
@@ -173,7 +220,7 @@ const fileDescriptorResponse = (file) => ({
     case: 'fileDescriptorResponse',
     value: new reflection_pb_1.FileDescriptorResponse({
         fileDescriptorProto: [file.proto.toBinary()],
-    })
+    }),
 });
 const errorResponse = (errorMessage, errorCode) => ({
     case: 'errorResponse',

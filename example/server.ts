@@ -1,12 +1,12 @@
 import * as http2 from "http2";
 import { connectNodeAdapter } from "@bufbuild/connect-node";
-import { withReflection } from "../src/reflection";
+import { withReflection } from "grpc-node-reflection";
 import { readFileSync } from "fs";
-import { ElizaService } from "../gen/eliza_connect";
+import { ElizaService } from "./gen/eliza_connect";
 import { ConnectRouter } from "@bufbuild/connect";
 
 const routes = (router: ConnectRouter) => withReflection(
-  readFileSync("./gen/image.bin"),
+  readFileSync("./proto/image.bin"),
   router.service(ElizaService, {
     say(req) {
       return {
